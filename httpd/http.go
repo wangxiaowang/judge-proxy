@@ -21,10 +21,6 @@ func NewHttpServer(c *client.Client, config Config) (*HttpServer, error) {
 	handler := NewHandler(c)
 
 	router := httprouter.New()
-	// router.POST("/query", handler.query)
-	// router.GET("/query", handler.query)
-	// router.POST("/ping", handler.ping)
-	// router.GET("/ping", handler.ping)
 	router.POST("/write", handler.write)
 	router.GET("/write", handler.write)
 
