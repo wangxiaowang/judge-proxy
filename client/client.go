@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"sync"
 
 	log "github.com/Sirupsen/logrus"
 	client "github.com/influxdata/influxdb/client/v2"
@@ -13,7 +14,9 @@ type Client struct {
 	config        Config                   //represents configuration file
 	downstream    []client.Client          // represents alive nodes' url
 	downstreamMap map[string]client.Client //represents a mapping relationship between nodes' url and actual client
-	ring          interface {
+
+	mutex sync.RWMutex
+	ring  interface {
 		GetNode(string) (string, bool)
 	}
 }
@@ -37,6 +40,33 @@ func NewClient(config Config) (*Client, error) {
 
 	c.ring = hashring.New(addrs)
 	return c, nil
+}
+func ResetConfig(c *Client, config Config) {
+	c.resetConfig(config)
+}
+func (c *Client) resetConfig(config Config) bool {
+	if config.equals(c.config) {
+		fmt.Println("Two config are same. Not need to change")
+	}
+
+	addrs := config.Addrs
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.downstreamMap = make(map[string]client.Client, len(addrs))
+	for _, addr := range addrs {
+		influxClient, err := client.NewHTTPClient(client.HTTPConfig{
+			Addr: addr,
+		})
+		if err != nil {
+			return false
+		}
+		c.downstream = append(c.downstream, influxClient)
+		c.downstreamMap[addr] = influxClient
+	}
+
+	c.ring = hashring.New(addrs)
+	return true
 }
 
 //makeBatchPoints will convert points to BatchPoints which client can write
@@ -79,6 +109,8 @@ func (c *Client) makeBatchPointsMap(database string, consistency string, precisi
 
 //Write will write batch points to nodes. Note: Except node leavs or joins cluster, Write will write data with same measurement into same group of nodes.
 func (c *Client) Write(database string, consistency string, precision string, points []models.Point) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	batchMap := c.makeBatchPointsMap(database, consistency, precision, points)
 	for node, batch := range batchMap {
 		downstream, ok := c.downstreamMap[node]
