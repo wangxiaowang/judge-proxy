@@ -15,12 +15,13 @@ type Client struct {
 	downstream    []client.Client          // represents alive nodes' url
 	downstreamMap map[string]client.Client //represents a mapping relationship between nodes' url and actual client
 
-	mutex sync.RWMutex
+	mutex sync.RWMutex //represents a read or write lock
 	ring  interface {
 		GetNode(string) (string, bool)
 	}
 }
 
+//NewClient creates a new client according config
 func NewClient(config Config) (*Client, error) {
 	c := &Client{config: config}
 
@@ -41,12 +42,16 @@ func NewClient(config Config) (*Client, error) {
 	c.ring = hashring.New(addrs)
 	return c, nil
 }
+
+//ResetConfig is a wrapper function for resetConfig. It can be called outside this package.
 func ResetConfig(c *Client, config Config) {
 	c.resetConfig(config)
 }
+
+//resetConfig will reset client's config, if such config is valid and different thant original one
 func (c *Client) resetConfig(config Config) bool {
 	if config.equals(c.config) {
-		fmt.Println("Two config are same. Not need to change")
+		fmt.Println("Two config are same. Not need to change.")
 	}
 
 	addrs := config.Addrs
