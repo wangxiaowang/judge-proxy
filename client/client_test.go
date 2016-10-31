@@ -15,50 +15,53 @@ func getRandomConfig(length int) client.Config {
 	r := rand.New(s)
 	addrs := make([]string, length)
 	var localhost string
-	localhost = "0.0.0.0"
-	for i := 0; i < 4; i++ {
-		url := localhost + ":" + string(r.Intn(10)*1000)
+	localhost = "http://192.168.80.158"
+	for i := 0; i < length; i++ {
+		url := localhost + ":" + string((r.Intn(10000) + 100))
 		addrs[i] = url
 	}
 
-	var config client.Config
-	copy(config.Addrs, addrs)
-
+	config := client.Config{
+		Addrs: addrs,
+	}
 	return config
 }
 
 func TestClient_GetNode(t *testing.T) {
 	//create four virtual address
-	c, _ := client.NewClient(getRandomConfig((4)))
+	config := getRandomConfig((20))
+
+	c, err := client.NewClient(config)
+
+	if err != nil {
+		t.Errorf("Failed to create client %v", err)
+	}
 
 	prefix := "cpu"
 
 	times := make(map[string]float64)
 
 	for i := 0; i < 1000; i++ {
-		url, _ := c.GetNode(prefix + wordGenerator.GetWord(20))
-		times[url] = times[url] + 1
+		measurement := prefix + wordGenerator.GetWord(20)
+		url, _ := c.GetNode(measurement)
+		times[url] += 1
 	}
 
 	avergae := 0.0
 	length := float64(len(times))
+
 	for _, v := range times {
 		avergae += v
 	}
 
 	avergae /= length
 
-	ok := true
-
 	for _, v := range times {
-		if math.Abs(float64(v)-avergae) > 30 {
-			ok = false
-			break
+		diff := math.Abs(float64(v) - avergae)
+		if diff > 1000*0.3 {
+			t.Errorf(" Evenly distributing keys failed. Differnce: %f. Average: %f", diff, avergae)
+			// break
 		}
-	}
-
-	if !ok {
-		t.Errorf("Consistent hashing can not distributed incoming request evenly")
 	}
 }
 
@@ -67,15 +70,70 @@ func TestClient_ResetConfig(t *testing.T) {
 	c, _ := client.NewClient(oldConfig)
 
 	newConfig := getRandomConfig(4)
-	go func() {
-		for i := 0; i < 10; i++ {
-			c.GetNode(wordGenerator.GetWord(4))
-		}
-	}()
+	// go func() {
+	// for i := 0; i < 10; i++ {
+	// node, _ := c.GetNode(wordGenerator.GetWord(4))
+	// }
+	// }()
 
 	err, ok := c.ResetConfig(newConfig)
 
 	if !ok {
 		t.Errorf("Failed to reset client's config", err)
 	}
+}
+
+func difference(a []string, b []string) []string {
+	diffStrs := []string{}
+	m := map[string]int{}
+
+	for _, str := range a {
+		m[str] = 1
+	}
+
+	for _, str := range b {
+		m[str] = m[str] + 1
+	}
+
+	for k, v := range m {
+		if v == 1 {
+			diffStrs = append(diffStrs, k)
+		}
+	}
+
+	return diffStrs
+}
+
+func TestClient_RemoveNode(t *testing.T) {
+	config := getRandomConfig(10)
+	c, _ := client.NewClient(config)
+
+	measurements := wordGenerator.GetWords(1000, 20)
+	measurementsMap := make(map[string][]string)
+
+	for _, measurement := range measurements {
+		nodes := measurementsMap[measurement]
+		if node, ok := c.GetNode(measurement); ok {
+			nodes = append(nodes, node)
+		}
+	}
+	// s := rand.NewSource(time.Now().UnixNano())
+	// r := rand.New(s)
+	c.RemoveNode(config.Addrs[0])
+
+	newMeasurementsMap := make(map[string][]string)
+	for _, measurement := range measurements {
+		nodes := newMeasurementsMap[measurement]
+		if node, ok := c.GetNode(measurement); ok {
+			nodes = append(nodes, node)
+		}
+	}
+
+	//TODO: compare the difference between measurements
+	for _, measurement := range measurements {
+		if len(difference(measurementsMap[measurement], newMeasurementsMap[measurement])) > 10 {
+			t.Errorf("Failed to verify remove node")
+		}
+	}
+
 }

@@ -16,13 +16,11 @@ type Client struct {
 	downstreamMap map[string]client.Client //represents a mapping relationship between nodes' url and actual client
 
 	mutex sync.RWMutex //represents a read or write lock
-	ring  *hashring.HashRing
+	*hashring.HashRing
 }
 
 //NewClient creates a new client according config
 func NewClient(config Config) (*Client, error) {
-	c := &Client{config: config}
-
 	addrs := config.Addrs
 	length := len(addrs)
 
@@ -31,7 +29,8 @@ func NewClient(config Config) (*Client, error) {
 		weights[addrs[i]] = 1
 	}
 
-	c.downstreamMap = make(map[string]client.Client, len(addrs))
+	downstreamMap := make(map[string]client.Client, len(addrs))
+	downstream := make([]client.Client, len(addrs))
 	for _, addr := range addrs {
 		influxClient, err := client.NewHTTPClient(client.HTTPConfig{
 			Addr: addr,
@@ -39,17 +38,21 @@ func NewClient(config Config) (*Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("new http client: %v", err)
 		}
-		c.downstream = append(c.downstream, influxClient)
-		c.downstreamMap[addr] = influxClient
+		downstream = append(downstream, influxClient)
+		downstreamMap[addr] = influxClient
 	}
 
-	c.ring = hashring.NewWithWeights(weights)
+	ring := hashring.NewWithWeights(weights)
+	c := &Client{config: config,
+		downstream:    downstream,
+		downstreamMap: downstreamMap,
+		HashRing:      ring,
+	}
 	return c, nil
 }
 
 //ResetConfig will reset client's config, if such config is valid and different thant original one
 func (c *Client) ResetConfig(config Config) (error, bool) {
-	log.Infoln("Start to reset client's config")
 	addrs := config.Addrs
 	length := len(addrs)
 
@@ -72,13 +75,9 @@ func (c *Client) ResetConfig(config Config) (error, bool) {
 		c.downstreamMap[addr] = influxClient
 	}
 
-	c.ring = hashring.NewWithWeights(weights)
+	ring := hashring.NewWithWeights(weights)
+	c.HashRing = ring
 	return nil, true
-}
-
-//getNode will return a node's url from downstreams
-func (c *Client) GetNode(key string) (string, bool) {
-	return c.ring.GetNode(key)
 }
 
 //makeBatchPoints will convert points to BatchPoints which client can write
