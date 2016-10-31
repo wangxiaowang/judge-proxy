@@ -15,16 +15,21 @@ type Client struct {
 	downstream    []client.Client          // represents alive nodes' url
 	downstreamMap map[string]client.Client //represents a mapping relationship between nodes' url and actual client
 
-	mutex sync.RWMutex
-	ring  interface {
-		GetNode(string) (string, bool)
-	}
+	mutex sync.RWMutex //represents a read or write lock
+	ring  *hashring.HashRing
 }
 
+//NewClient creates a new client according config
 func NewClient(config Config) (*Client, error) {
 	c := &Client{config: config}
 
 	addrs := config.Addrs
+	length := len(addrs)
+
+	weights := make(map[string]int, length)
+	for i := 0; i < length; i++ {
+		weights[addrs[i]] = 1
+	}
 
 	c.downstreamMap = make(map[string]client.Client, len(addrs))
 	for _, addr := range addrs {
@@ -38,18 +43,20 @@ func NewClient(config Config) (*Client, error) {
 		c.downstreamMap[addr] = influxClient
 	}
 
-	c.ring = hashring.New(addrs)
+	c.ring = hashring.NewWithWeights(weights)
 	return c, nil
 }
-func ResetConfig(c *Client, config Config) {
-	c.resetConfig(config)
-}
-func (c *Client) resetConfig(config Config) bool {
-	if config.equals(c.config) {
-		fmt.Println("Two config are same. Not need to change")
-	}
 
+//ResetConfig will reset client's config, if such config is valid and different thant original one
+func (c *Client) ResetConfig(config Config) (error, bool) {
+	log.Infoln("Start to reset client's config")
 	addrs := config.Addrs
+	length := len(addrs)
+
+	weights := make(map[string]int, length)
+	for i := 0; i < length; i++ {
+		weights[addrs[i]] = 1
+	}
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -59,14 +66,19 @@ func (c *Client) resetConfig(config Config) bool {
 			Addr: addr,
 		})
 		if err != nil {
-			return false
+			return err, false
 		}
 		c.downstream = append(c.downstream, influxClient)
 		c.downstreamMap[addr] = influxClient
 	}
 
-	c.ring = hashring.New(addrs)
-	return true
+	c.ring = hashring.NewWithWeights(weights)
+	return nil, true
+}
+
+//getNode will return a node's url from downstreams
+func (c *Client) GetNode(key string) (string, bool) {
+	return c.ring.GetNode(key)
 }
 
 //makeBatchPoints will convert points to BatchPoints which client can write
@@ -75,7 +87,7 @@ func (c *Client) makeBatchPointsMap(database string, consistency string, precisi
 	batchMap := map[string]client.BatchPoints{}
 	for _, point := range points {
 		measurement := point.Name()
-		if node, ok := c.ring.GetNode(measurement); ok {
+		if node, ok := c.GetNode(measurement); ok {
 			var batch client.BatchPoints
 			var ok bool
 			if batch, ok = batchMap[node]; !ok {
