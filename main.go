@@ -66,9 +66,9 @@ func main() {
 			switch s {
 			case syscall.SIGUSR2:
 				fmt.Println("Recelived signal usr2. Now reload config")
-				ok := client.ResetConfig(c, config.Downstreams)
+				err, ok := c.ResetConfig(config.Downstreams)
 				if !ok {
-					fmt.Println("Something wrong during reloading. Please try it again.")
+					fmt.Println("Something wrong during reloading: %v. Please try it again.", err)
 				}
 			default:
 				fmt.Println("Not sure what do you want.")
