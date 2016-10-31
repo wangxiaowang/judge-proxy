@@ -33,12 +33,10 @@ func TestClient_GetNode(t *testing.T) {
 
 	prefix := "cpu"
 
-	wordGen := wordGenerator.New()
-
 	times := make(map[string]float64)
 
 	for i := 0; i < 1000; i++ {
-		url, _ := c.GetNode(prefix + wordGen.GetWord(20))
+		url, _ := c.GetNode(prefix + wordGenerator.GetWord(20))
 		times[url] = times[url] + 1
 	}
 
@@ -69,8 +67,12 @@ func TestClient_ResetConfig(t *testing.T) {
 	c, _ := client.NewClient(oldConfig)
 
 	newConfig := getRandomConfig(4)
-	//TODO: zhexuany, need to simulate the concurrent behavior
-	//GetNode and ResetConfig are happending at the same time.
+	go func() {
+		for i := 0; i < 10; i++ {
+			c.GetNode(wordGenerator.GetWord(4))
+		}
+	}()
+
 	err, ok := c.ResetConfig(newConfig)
 
 	if !ok {
